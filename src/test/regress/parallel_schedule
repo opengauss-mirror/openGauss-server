@@ -343,7 +343,7 @@ test: temp__3
 # so keep this parallel group to at most 19 tests
 # ----------
 test: plpgsql
-test: plancache limit rangefuncs prepare
+test: plancache limit rangefuncs prepare sequence
 test: returning largeobject
 test: hw_explain_pretty1 hw_explain_pretty2 hw_explain_pretty3
 test: goto
