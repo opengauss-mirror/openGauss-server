@@ -1389,6 +1389,7 @@ void RelationBuildTriggers(Relation relation)
         build->tgdeferrable = pg_trigger->tgdeferrable;
         build->tginitdeferred = pg_trigger->tginitdeferred;
         build->tgnargs = pg_trigger->tgnargs;
+        build->tuple = NULL;
         /* tgattr is first var-width field, so OK to access directly */
         build->tgnattr = pg_trigger->tgattr.dim1;
         if (build->tgnattr > 0) {
@@ -1548,6 +1549,7 @@ TriggerDesc* CopyTriggerDesc(TriggerDesc* trigdesc)
         }
         if (trigger->tgqual)
             trigger->tgqual = pstrdup(trigger->tgqual);
+        trigger->tuple = NULL;
         trigger++;
     }
 

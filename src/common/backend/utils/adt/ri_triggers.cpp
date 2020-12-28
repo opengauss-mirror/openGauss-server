@@ -117,6 +117,7 @@ typedef struct RI_ConstraintInfo {
                                        * PK) */
     Oid ff_eq_oprs[RI_MAX_NUMKEYS];   /* equality operators (FK =
                                        * FK) */
+    bool conisenable;                 /* constraint is enable or not */
 } RI_ConstraintInfo;
 
 /* ----------
@@ -243,6 +244,11 @@ static Datum RI_FKey_check(PG_FUNCTION_ARGS)
      * Get arguments.
      */
     ri_FetchConstraintInfo(&riinfo, trigdata->tg_trigger, trigdata->tg_relation, false);
+
+    if (!riinfo.conisenable)
+    {
+        return PointerGetDatum(NULL);
+    }
 
     if (TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event)) {
         new_row = trigdata->tg_newtuple;
@@ -2064,6 +2070,11 @@ bool RI_Initial_Check(Trigger* trigger, Relation fk_rel, Relation pk_rel)
     /* Fetch constraint info. */
     ri_FetchConstraintInfo(&riinfo, trigger, fk_rel, false);
 
+    if (!riinfo.conisenable)
+    {
+        return true;
+    }
+
     /*
      * Check to make sure current user has enough permissions to do the test
      * query.  (If not, caller can fall back to the trigger method, which
@@ -2483,14 +2494,32 @@ static void ri_FetchConstraintInfo(RI_ConstraintInfo* riinfo, Trigger* trigger, 
                     "Remove this referential integrity trigger and its mates, then do ALTER TABLE ADD CONSTRAINT.")));
     }
     /* OK, fetch the tuple */
-    tup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(constraintOid));
-
-    // should not happen
-    if (!HeapTupleIsValid(tup)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for constraint %u", constraintOid)));
+    if (trigger->tuple)
+    {
+        tup = trigger->tuple;
     }
+    else
+    {
+        tup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(constraintOid));
+
+        // should not happen
+        if (!HeapTupleIsValid(tup)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for constraint %u", constraintOid)));
+        }
+    }
+
     conForm = (Form_pg_constraint)GETSTRUCT(tup);
+
+    /* init conisenable here */
+    riinfo->conisenable = true;
+    if (conForm->contype == CONSTRAINT_FOREIGN && !conForm->conisenable)
+    {
+        riinfo->nkeys = 0;
+        riinfo->conisenable = false;
+        ReleaseSysCache(tup);
+        return;
+    }
 
     /* Do some easy cross-checks against the trigger call data */
     if (rel_is_pk) {
@@ -2612,7 +2641,11 @@ static void ri_FetchConstraintInfo(RI_ConstraintInfo* riinfo, Trigger* trigger, 
     if ((Pointer)arr != DatumGetPointer(adatum)) {
         pfree_ext(arr); /* free de-toasted copy, if any */
     }
-    ReleaseSysCache(tup);
+
+    if (!trigger->tuple)
+    {
+        ReleaseSysCache(tup);
+    }
 }
 
 /*

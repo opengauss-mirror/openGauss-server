@@ -164,6 +164,8 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
         values[Anum_pg_constraint_conopt - 1] = BoolGetDatum(inforConstraint->enableOpt);
     }
 
+    values[Anum_pg_constraint_conisenable - 1] = BoolGetDatum(true);
+
     if (conkeyArray != NULL)
         values[Anum_pg_constraint_conkey - 1] = PointerGetDatum(conkeyArray);
     else
@@ -528,7 +530,7 @@ void RemoveConstraintById(Oid conId)
                         errmsg("cache lookup failed for relation %u", con->conrelid)));
             classForm = (Form_pg_class)GETSTRUCT(relTup);
 
-            if (classForm->relchecks == 0) /* should not happen */
+            if (classForm->relchecks == 0 && con->conisenable) /* should not happen */
                 ereport(ERROR,
                     (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                         errmsg("relation \"%s\" has relchecks = 0", RelationGetRelationName(rel))));

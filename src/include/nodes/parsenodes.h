@@ -1567,6 +1567,8 @@ typedef enum AlterTableType {
     AT_ExchangePartition, /* ALTER TABLE EXCHANGE PARTITION WITH TABLE */
     AT_MergePartition,    /*MERGE PARTITION */
     AT_SplitPartition,    /* SPLIT PARTITION */
+    AT_EnableConstraint,        /* ENABLE CONSTRAINT name*/
+    AT_DisableConstraint,       /* DISABLE CONSTRAINT name */
     /* this will be in a more natural position in 9.3: */
     AT_ReAddConstraint  /* internal to commands/tablecmds.c */
 } AlterTableType;

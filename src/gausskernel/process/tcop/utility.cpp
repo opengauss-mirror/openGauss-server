@@ -7747,6 +7747,12 @@ const char* CreateAlterTableCommandTag(const AlterTableType subtype)
         case AT_SET_COMPRESS:
             tag = "SET COMPRESS";
             break;
+        case AT_EnableConstraint:
+            tag = "ENABLE CONSTRAINT";
+            break;
+        case AT_DisableConstraint:
+            tag = "DISABLE CONSTRAINT";
+            break;
 #ifdef PGXC
         case AT_DistributeBy:
             tag = "DISTRIBUTE BY";

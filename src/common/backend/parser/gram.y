@@ -3267,6 +3267,22 @@ alter_table_cmd:
 					n->def = (Node *)$1;
 					$$ = (Node *) n;
 				}
+                /* ALTER TABLE <name> ENABLE CONSTRAINT <cons> */
+				| ENABLE_P CONSTRAINT name
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_EnableConstraint;
+					n->name = $3;
+					$$ = (Node *)n;
+				}
+				/* ALTER TABLE <name> DISABLE CONSTRAINT <cons> */
+				| DISABLE_P CONSTRAINT name
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_DisableConstraint;
+					n->name = $3;
+					$$ = (Node *)n;
+				}
 
 /* PGXC_BEGIN */
 			/* ALTER TABLE <name> DISTRIBUTE BY ... */
