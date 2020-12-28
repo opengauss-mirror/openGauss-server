@@ -362,7 +362,16 @@ static void pgarch_MainLoop(void)
         if (!time_to_stop) {
             /* Don't wait during last iteration */
             pg_time_t curtime = (pg_time_t)time(NULL);
-            const int timeout = PGARCH_AUTOWAKE_INTERVAL - (curtime - last_copy_time);
+            int64 timeout;
+            /*
+             * if curtime less than last_copy_time, set timeout to PGARCH_AUTOWAKE_INTERVAL.
+             * Otherwise the timeout may be a large number.
+             */
+            if (curtime > last_copy_time) {
+                timeout = PGARCH_AUTOWAKE_INTERVAL - (curtime - last_copy_time);
+            } else {
+                timeout = PGARCH_AUTOWAKE_INTERVAL;
+            }
             if (timeout > 0) {
                 int rc;
 

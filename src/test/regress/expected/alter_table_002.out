@@ -488,24 +488,21 @@ create rule def_view_test_ins as
 	on insert to def_view_test
 	do instead insert into def_test select new.*;
 insert into def_view_test default values;
-ERROR:  cannot insert into view "def_view_test"
-HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
 alter table def_view_test alter column c1 set default 45;
 insert into def_view_test default values;
-ERROR:  cannot insert into view "def_view_test"
-HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
 alter table def_view_test alter column c2 set default 'view_default';
 insert into def_view_test default values;
-ERROR:  cannot insert into view "def_view_test"
-HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
 select * from def_view_test order by 1, 2;
  c1 |       c2        
 ----+-----------------
   5 | initial_default
  10 | new_default
+ 45 | view_default
+ 45 | 
     | initial_default
     | 
-(4 rows)
+    | 
+(7 rows)
 
 drop rule def_view_test_ins on def_view_test;
 drop view def_view_test;

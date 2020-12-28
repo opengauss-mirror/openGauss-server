@@ -4137,17 +4137,6 @@ int parse_double_value(const char* paraname, const char* value, const char* guc_
     return SUCCESS;
 }
 
-/*
- ************************************************************************************
- Function: check_enum_type_value
- Desc    : check the parameter value of enum type.
- Input   : paraname               parameter name
-           guc_list_value         the string from config file
-           value                  parameter value
- Return  : SUCCESS
-           FAILURE
- ************************************************************************************
-*/
 int is_value_in_range(const char* guc_list_value, const char* value)
 {
     char* ptr = NULL;
@@ -4172,6 +4161,17 @@ int is_value_in_range(const char* guc_list_value, const char* value)
     return FAILURE;
 }
 
+/*
+ ************************************************************************************
+ Function: check_enum_type_value
+ Desc    : check the parameter value of enum type.
+ Input   : paraname               parameter name
+           guc_list_value         the string from config file
+           value                  parameter value
+ Return  : SUCCESS
+           FAILURE
+ ************************************************************************************
+*/
 int check_enum_type_value(const char* paraname, char* guc_list_value, const char* value)
 {
     char guc_val[MAX_VALUE_LEN] = {0};
@@ -4195,7 +4195,11 @@ int check_enum_type_value(const char* paraname, char* guc_list_value, const char
     }
 
     make_string_tolower(value, tmp_paraname, sizeof(tmp_paraname) / sizeof(char));
-    vptr = strtok_r(tmp_paraname, delims, &vouter_ptr);
+    if (tmp_paraname != NULL && strlen(tmp_paraname) > 0) {
+        vptr = strtok_r(tmp_paraname, delims, &vouter_ptr);
+    } else {
+        vptr = "";
+    }
     while (NULL != vptr) {
         p = vptr;
         while (isspace((unsigned char)*p))

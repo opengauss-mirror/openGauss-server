@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_RULE">
+<refmeta>
+<refentrytitle>ALTER TABLE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP RULE</refname>
+<refpurpose>remove a rewrite rule</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP RULE [ IF EXISTS ] name ON table_name [ CASCADE | RESTRICT ]
+</synopsis>
+</refsynopsisdiv>
+</refentry>

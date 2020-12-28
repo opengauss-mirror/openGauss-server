@@ -2182,8 +2182,6 @@ Try "gs_dump --help" for more information.
 --?gs_dump[port='@portstring@'][postgres][.*]: total time: .* ms
 ----quote-all-identifiers
 \! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/p --use-set-session-authorization --serializable-deferrable --quote-all-identifiers
---?gs_dump[port='@portstring@'][postgres][.*]: WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
---?gs_dump[port='@portstring@'][postgres][.*]: WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
 --?gs_dump[port='@portstring@'][postgres][.*]: The total objects number is 421.
 --?gs_dump[port='@portstring@'][postgres][.*]: [100.00%] 421 objects have been dumped.
 --?gs_dump[port='@portstring@'][postgres][.*]: dump database postgres successfully
@@ -2512,8 +2510,6 @@ Try "gs_dump --help" for more information.
 --?gs_dump[port='@portstring@'][postgres][.*]: total time: .* ms
 --quote-all-identifiers
 \! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/c  --use-set-session-authorization --serializable-deferrable --quote-all-identifiers
---?gs_dump[port='@portstring@'][postgres][.*]: WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
---?gs_dump[port='@portstring@'][postgres][.*]: WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
 --?gs_dump[port='@portstring@'][postgres][.*]: The total objects number is 421.
 --?gs_dump[port='@portstring@'][postgres][.*]: [100.00%] 421 objects have been dumped.
 --?gs_dump[port='@portstring@'][postgres][.*]: dump database postgres successfully
@@ -2829,8 +2825,6 @@ Try "gs_dump --help" for more information.
 --?gs_dump[port='@portstring@'][postgres][.*]: total time: .* ms
 --quote-all-identifiers
 \! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/tb22 -c -n zcl -f @abs_srcdir@/d  --use-set-session-authorization --serializable-deferrable --quote-all-identifiers
---?gs_dump[port='@portstring@'][postgres][.*]: WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
---?gs_dump[port='@portstring@'][postgres][.*]: WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
 --?gs_dump[port='@portstring@'][postgres][.*]: The total objects number is 421.
 --?gs_dump[port='@portstring@'][postgres][.*]: [100.00%] 421 objects have been dumped.
 --?gs_dump[port='@portstring@'][postgres][.*]: dump database postgres successfully
@@ -3155,8 +3149,6 @@ Try "gs_dump --help" for more information.
 --?gs_dump[port='@portstring@'][postgres][.*]: total time: .* ms
 --quote-all-identifiers
 \! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema39' -c -n zcl -f @abs_srcdir@/t  --use-set-session-authorization --serializable-deferrable --quote-all-identifiers
---?gs_dump[port='@portstring@'][postgres][.*]: WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
---?gs_dump[port='@portstring@'][postgres][.*]: WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
 --?gs_dump[port='@portstring@'][postgres][.*]: The total objects number is 421.
 --?gs_dump[port='@portstring@'][postgres][.*]: [100.00%] 421 objects have been dumped.
 --?gs_dump[port='@portstring@'][postgres][.*]: dump database postgres successfully

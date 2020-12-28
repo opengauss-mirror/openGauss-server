@@ -275,6 +275,7 @@ static void set_build_pid(pgpid_t pid);
 static void close_connection(void);
 static PGconn* get_connectionex(void);
 static ServerMode get_runmode(void);
+static DbState get_primary_status(void);
 static void freefile(char** lines);
 static char* get_localrole_string(ServerMode mode);
 static void do_actual_build(uint32 term = 0);
@@ -676,6 +677,64 @@ static ServerMode get_runmode(void)
         return UNKNOWN_MODE;
 
     return UNKNOWN_MODE;
+}
+
+static DbState get_primary_status(void)
+{
+    PGconn* conn = NULL;
+    PGresult* res = NULL;
+    char* val = NULL;
+    const char* sql_string = "select peer_state from pg_stat_get_wal_receiver();";
+    char primary_status[MAXRUNMODE] = {0};
+    errno_t tnRet = EOK;
+
+    conn = get_connectionex();
+
+    if (PQstatus(conn) != CONNECTION_OK) {
+        pg_log(PG_WARNING, _("Could not connect to the local server : connection failed!\n"));
+        close_connection();
+        conn = NULL;
+        return UNKNOWN_STATE;
+    }
+    
+    res = PQexec(conn, sql_string);
+
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        pg_log(PG_WARNING, _("SQL command failed! \n%s\n%s\n"), sql_string, PQerrorMessage(conn));
+        close_connection();
+        conn = NULL;
+        return UNKNOWN_STATE;
+    }
+
+    if (PQnfields(res) != 1 || PQntuples(res) != 1) {
+        int ntuples = PQntuples(res);
+        int nfields = PQnfields(res);
+
+        PQclear(res);
+        pg_log(PG_WARNING,
+            _("invalid response from primary server: "
+              "Expected 1 tuple with 1 fields, got %d tuples with %d fields."),
+            ntuples,
+            nfields);
+        close_connection();
+        conn = NULL;
+        return UNKNOWN_STATE;
+    }
+
+    if ((val = PQgetvalue(res, 0, 0)) != NULL) {
+        tnRet = strncpy_s(primary_status, MAXRUNMODE, val, strlen(val));
+        securec_check_c(tnRet, "\0", "\0");
+        primary_status[MAXRUNMODE - 1] = '\0';
+    }
+    PQclear(res);
+    close_connection();
+    conn = NULL;
+
+    if (!strncmp(primary_status, "Normal", MAXRUNMODE)) {
+        return NORMAL_STATE;
+    }
+    return UNKNOWN_STATE;
 }
 
 static void freefile(char** lines)
@@ -4989,6 +5048,10 @@ int main(int argc, char** argv)
             break;
         case FAILOVER_COMMAND:
             pg_log(PG_PROGRESS, _("gs_ctl failover ,datadir is %s \n"), pg_data);
+            if (get_primary_status() == NORMAL_STATE) {
+                pg_log(PG_PROGRESS, _("The primary node status is normal, failover failed! \n"));
+                break;
+            }
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
                 do_failover(term);
                 pg_ctl_unlock(lockfile);

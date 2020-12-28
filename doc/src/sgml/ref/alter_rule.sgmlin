@@ -1,0 +1,16 @@
+<refentry id="SQL-ALTER_RULE">
+<refmeta>
+<refentrytitle>ALTER RULE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER RULE</refname>
+<refpurpose>change the definition of a rule</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER RULE name ON table_name RENAME TO new_name
+</synopsis>
+</refsynopsisdiv>
+</refentry>

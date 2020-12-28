@@ -219,6 +219,11 @@ THR_LOCAL int comm_ackchk_time;
 
 static THR_LOCAL GucContext currentGucContext;
 
+const char* SYSTEM_SCHEMA[] = {"pg_temp", 
+    "\"pg_temp\"",
+    "pg_catalog",
+    "\"pg_catalog\""};
+
 const char* sync_guc_variable_namelist[] = {"work_mem",
     "query_mem",
     "ssl_renegotiation_limit",
@@ -406,6 +411,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "sql_use_spacelimit",
     "basebackup_timeout"};
 
+static inline bool JudgeSystemSchema(const char* spcname, const char** schema_type, int size);
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);
 static bool call_bool_check_hook(struct config_bool* conf, bool* newval, void** extra, GucSource source, int elevel);
 static bool call_int_check_hook(struct config_int* conf, int* newval, void** extra, GucSource source, int elevel);
@@ -3942,7 +3948,7 @@ static void init_configure_names_bool()
                 "most_available_sync",
                 PGC_POSTMASTER,
                 REPLICATION_MASTER,
-                gettext_noop("Enables master to continue as standalone on sync standbys failure."),
+                gettext_noop("Enables master to continue when sync standbys failure."),
                 NULL,
             },
             &g_instance.attr.attr_storage.gucMostAvailableSync,
@@ -16354,6 +16360,23 @@ void AlterSystemSetConfigFile(AlterSystemStmt * altersysstmt)
  }
 
 /*
+ * This function macth the order of the schema in the search path with the system schema to 
+ * make sure the system schema pg_temp and pg_catalog before the others schema in the search path
+ */
+static inline bool JudgeSystemSchema(const char* spcname, const char** schema_type, int size)
+{
+    /* match the system schema pg_temp and pg_catalog in the search path */
+    bool flag = false;
+    for (int i = 0; i < size; i++) {
+        if (strncmp(spcname, schema_type[i], strlen(schema_type[i])) == 0) {
+            flag = true;
+            break;
+        }
+    }
+    return flag;
+}
+
+/*
  * SET command
  */
 void ExecSetVariableStmt(VariableSetStmt* stmt)
@@ -16415,8 +16438,9 @@ void ExecSetVariableStmt(VariableSetStmt* stmt)
                 if (spcname != NULL) {
                     char* tempname = strstr(spcname, SCHEMA_TEMP_NAME);
                     char* catalogname = strstr(spcname, SCHEMA_CATALOG_NAME);
-                    if ((tempname != NULL && tempname - spcname != 0) ||
-                        (catalogname != NULL && catalogname - spcname != 0)) {
+                    int schema_type_size = sizeof(SYSTEM_SCHEMA) / sizeof(SYSTEM_SCHEMA[0]);
+                    if ((tempname != NULL && JudgeSystemSchema(spcname, SYSTEM_SCHEMA, schema_type_size) == false) ||
+                        (catalogname != NULL && JudgeSystemSchema(spcname, SYSTEM_SCHEMA, schema_type_size) == false)) {
                         ereport(WARNING,
                             (errmsg("It is invalid to set pg_temp or pg_catalog behind other schemas in search path "
                                     "explicitly. The priority order is pg_temp, pg_catalog and other schemas.")));

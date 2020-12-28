@@ -2373,7 +2373,7 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
 #ifdef PGXC
                 List* product_queries = NIL;
 
-                if (IS_PGXC_COORDINATOR)
+                if (IS_SINGLE_NODE || IS_PGXC_COORDINATOR)
 #else
             List* product_queries;
 #endif

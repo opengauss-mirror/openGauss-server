@@ -51,6 +51,7 @@ class Backup(ParallelBaseOM):
         self.backupDir = ""
         self.isParameter = False
         self.isBinary = False
+        self.clusterStaticFile = ""
 
     ####################################################################################
     # Help context. U:R:oC:v: 
