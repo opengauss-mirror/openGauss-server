@@ -1,0 +1,24 @@
+---
+-- disable dbe_perf and snapshot
+---
+-- 1. Test whether the administrator has dbe_perf and snapshot schema permissions
+create table t1(col int);
+alter table t1 set schema dbe_perf;
+alter table t1 set schema snapshot;
+-- 2. Test whether the wdr snapshot is generated properly
+\c postgres
+alter system set enable_wdr_snapshot to on;
+\! sleep 15s
+show enable_wdr_snapshot ;
+select create_wdr_snapshot();
+\! sleep 15s
+select create_wdr_snapshot();
+\! sleep 15s
+select create_wdr_snapshot();
+\! sleep 15s
+select snapshot_id from snapshot.snapshot limit 4;
+\! mkdir @abs_srcdir@/temp
+\a \t \o @abs_srcdir@/temp/wdrTestNode.html
+\! test -f @abs_srcdir@/temp/wdrTestNode.html && echo "found" || echo "not found"
+\o \a \t
+\! rm @abs_srcdir@/temp -rf
