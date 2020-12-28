@@ -254,7 +254,7 @@ extern void GetConfigOptionByNum(int varnum, const char** values, bool* noshow);
 extern int GetNumConfigOptions(void);
 
 extern void SetPGVariable(const char* name, List* args, bool is_local);
-extern void GetPGVariable(const char* name, DestReceiver* dest);
+extern void GetPGVariable(const char* name, const char* likename, DestReceiver* dest);
 extern TupleDesc GetPGVariableResultDesc(const char* name);
 
 #ifdef PGXC

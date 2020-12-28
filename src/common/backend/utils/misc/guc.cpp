@@ -12360,7 +12360,7 @@ static void report_guc_option(struct config_generic* record);
 static void reapply_stacked_values(struct config_generic* variable, struct config_string* holder, GucStack* stack,
     const char* curvalue, GucContext curscontext, GucSource cursource);
 static void show_guc_config_option(const char* name, DestReceiver* dest);
-static void show_all_guc_config(DestReceiver* dest);
+static void show_all_guc_config(const char* likename, DestReceiver* dest);
 static char* _show_option(struct config_generic* record, bool use_units);
 static bool validate_option_array_item(const char* name, const char* value, bool skip_if_no_permissions);
 static void replace_config_value(char** optlines, char* name, char* value, config_type vartype);
@@ -17048,10 +17048,10 @@ void EmitWarningsOnPlaceholders(const char* className)
 /*
  * SHOW command
  */
-void GetPGVariable(const char* name, DestReceiver* dest)
+void GetPGVariable(const char* name, const char* likename, DestReceiver* dest)
 {
     if (guc_name_compare(name, "all") == 0) {
-        show_all_guc_config(dest);
+        show_all_guc_config(likename, dest);
     } else {
         show_guc_config_option(name, dest);
     }
@@ -17110,7 +17110,7 @@ static void show_guc_config_option(const char* name, DestReceiver* dest)
 /*
  * SHOW ALL command
  */
-static void show_all_guc_config(DestReceiver* dest)
+static void show_all_guc_config(const char* likename, DestReceiver* dest)
 {
     bool am_superuser = (GetUserId() == BOOTSTRAP_SUPERUSERID);
     int i;
@@ -17118,6 +17118,7 @@ static void show_all_guc_config(DestReceiver* dest)
     TupleDesc tupdesc;
     Datum values[3];
     bool isnull[3] = {false, false, false};
+    char* ptr;
 
     /* need a tuple descriptor representing three TEXT columns */
     tupdesc = CreateTemplateTupleDesc(3, false);
@@ -17134,6 +17135,13 @@ static void show_all_guc_config(DestReceiver* dest)
 
         if ((conf->flags & GUC_NO_SHOW_ALL) || ((conf->flags & GUC_SUPERUSER_ONLY) && !am_superuser)) {
             continue;
+        }
+
+        if(NULL != likename) {
+            ptr = strstr((char*)conf->name, likename);
+            if (NULL == ptr) {
+                continue;
+            }
         }
 
         /* assign to the values array */
