@@ -16367,7 +16367,7 @@ static inline int JudgeSystemSchema(const char* spcname, const char** schema_typ
 {
     /* match the system schema pg_temp and pg_catalog in the search path */
     int flag = 0;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < size; i++) {
         if (strncmp(schema_name, schema_type[i], strlen(schema_type[i])) == 0) {
             flag = 1;
             break;
