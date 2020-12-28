@@ -6724,7 +6724,7 @@ static void init_configure_names_int()
                 NULL
             },
             &g_instance.attr.attr_storage.replication_type,
-            RT_WITH_DUMMY_STANDBY,
+            RT_WITH_MULTI_STNADBY,
             RT_WITH_DUMMY_STANDBY,
             RT_NUM,
             check_replication_type,
@@ -21237,6 +21237,9 @@ static bool check_replication_type(int* newval, void** extra, GucSource source)
                     errmsg("replication_type is not allowed set 1 "
                            "in Current Version. Set to default (0).")));
         }
+    } else {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("replication_type is only allowed set to 1, newval=%d.", *newval)));
     }
     return true;
 }
