@@ -22,8 +22,8 @@ usergroup="dbgrp"
 envfilepath="${workdir}/om/env1"
 logfilesavepath=/home/OM/log
 upgradefilepath_om=${workdir}/openGauss/package/openGauss-1.1.0-CentOS-64bit-om.tar.gz
-upgradefilepath_app=${workdir}/openGauss/package/openGauss-1.1.0-CentOS-64bit.tar.bz2
-upgradefilepath_app_sha256=${workdir}/openGauss/package/openGauss-1.1.0-CentOS-64bit.sha256
+upgradefilepath_app=${workdir}/openGauss/package/openGauss-1.0.1-CentOS-64bit.tar.bz2
+upgradefilepath_app_sha256=${workdir}/openGauss/package/openGauss-1.0.1-CentOS-64bit.sha256
 package_path=/home/openGauss-1.0.1-CentOS-b109-64bit.tar.gz 
 shellfilepath=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 # 用户校验
