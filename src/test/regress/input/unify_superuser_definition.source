@@ -1,0 +1,35 @@
+create user grant_all with password 'openGauss@123';
+grant all privileges to grant_all;
+create user standard_user with password 'openGauss@123';
+
+-- sighup
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U grant_all -W openGauss@123 -c "show password_reuse_max;";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U grant_all -W openGauss@123 -c "alter system set password_reuse_max=1;";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U grant_all -W openGauss@123 -c "show password_reuse_max;";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U grant_all -W openGauss@123 -c "alter system set password_reuse_max=0;"
+
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U standard_user -W openGauss@123 -c "show password_reuse_max;";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U standard_user -W openGauss@123 -c "alter system set password_reuse_max=1;";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U standard_user -W openGauss@123 -c "show password_reuse_max;";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U standard_user -W openGauss@123 -c "alter system set password_reuse_max=0;"
+
+show password_reuse_max;
+alter system set password_reuse_max=1;
+show password_reuse_max;
+alter system set password_reuse_max=0;
+
+-- suset
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U grant_all -W openGauss@123 -c "show pljava_vmoptions;";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U grant_all -W openGauss@123 -c "set pljava_vmoptions='aaa';";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U grant_all -W openGauss@123 -c "show pljava_vmoptions;";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U grant_all -W openGauss@123 -c "set pljava_vmoptions='';"
+
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U standard_user -W openGauss@123 -c "show pljava_vmoptions;";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U standard_user -W openGauss@123 -c "set pljava_vmoptions='aaa';";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U standard_user -W openGauss@123 -c "show pljava_vmoptions;";
+\! @gsqldir@/gsql -d postgres -p @portstring@ -U standard_user -W openGauss@123 -c "set pljava_vmoptions='';"
+
+show pljava_vmoptions;
+set pljava_vmoptions='aaa';
+show pljava_vmoptions;
+set pljava_vmoptions='';
