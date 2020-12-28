@@ -39,7 +39,7 @@ group by
 	l_year
 order by 
 	revenue;
-                                                                                                      QUERY PLAN                                                                                                      
+                                                                                                      QUERY PLAN
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Sort
    Sort Key: (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))
@@ -67,13 +67,15 @@ order by
                                                          Join Filter: (((n1.n_name = 'FRANCE '::bpchar) AND (n2.n_name = 'GERMANY'::bpchar)) OR ((n1.n_name = 'GERMANY'::bpchar) AND (n2.n_name = 'FRANCE'::bpchar)))
                                                          ->  Row Adapter
                                                                ->  CStore Scan on nation n1
+                                                                     Filter: ((n_name = 'FRANCE '::bpchar) OR (n_name = 'FRANCE '::bpchar) OR (n_name = 'GERMANY'::bpchar) OR (n_name = 'GERMANY'::bpchar))
                                                          ->  Materialize
                                                                ->  Row Adapter
                                                                      ->  CStore Scan on nation n2
+                                                                           Filter: ((n_name = 'GERMANY'::bpchar) OR (n_name = 'GERMANY'::bpchar) OR (n_name = 'FRANCE'::bpchar) OR (n_name = 'FRANCE'::bpchar))
                ->  Hash
                      ->  Row Adapter
                            ->  CStore Scan on supplier
-(32 rows)
+(34 rows)
 
 select
 	supp_nation,

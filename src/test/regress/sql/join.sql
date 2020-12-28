@@ -722,6 +722,10 @@ order by c.name;
 
 rollback;
 
+analyse int4_tbl;
+analyse int8_tbl;
+analyse tenk1;
+analyse text_tbl;
 --
 -- test incorrect handling of placeholders that only appear in targetlists,
 -- per bug #6154
@@ -824,6 +828,22 @@ select * from
   int4(sin(1)) q1,
   int4(sin(0)) q2
 where thousand = (q1 + q2);
+
+--
+-- test extraction of restriction OR clauses from join OR clause
+-- (we used to only do this for indexable clauses)
+--
+
+explain (costs off)
+select * from tenk1 a join tenk1 b on
+        (a.unique1 = 1 and b.unique1 = 2) or (a.unique2 = 3 and b.hundred = 4);
+explain (costs off)
+select * from tenk1 a join tenk1 b on
+        (a.unique1 = 1 and b.unique1 = 2) or (a.unique2 = 3 and b.ten = 4);
+explain (costs off)
+select * from tenk1 a join tenk1 b on
+        (a.unique1 = 1 and b.unique1 = 2) or
+        ((a.unique2 = 3 or a.unique2 = 7) and b.hundred = 4);
 
 --
 -- test ability to generate a suitable plan for a star-schema query

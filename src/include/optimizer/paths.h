@@ -56,13 +56,6 @@ inline bool CheckIndexPathUseGPI(IndexPath* ipath)
     return ipath->indexinfo->isGlobal;
 }
 
-
-/*
- * orindxpath.c
- *	  additional routines for indexable OR clauses
- */
-extern bool create_or_index_quals(PlannerInfo* root, RelOptInfo* rel);
-
 /*
  * tidpath.h
  *	  routines to generate tid paths
