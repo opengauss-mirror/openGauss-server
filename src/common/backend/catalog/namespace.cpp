@@ -2700,6 +2700,14 @@ void CheckSetNamespace(Oid oldNspOid, Oid nspOid, Oid classid, Oid objid)
 
     if (nspOid == PG_CATALOG_NAMESPACE)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into system schema")));
+    
+    /* disallow set into dbe_perf schema */
+    if (nspOid == PG_DBMSPERF_NAMESPACE)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into dbe_perf schema")));
+    
+    /* disallow set into snapshot schema */
+    if (nspOid == PG_SNAPSHOT_NAMESPACE)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into snapshot schema")));
 }
 
 /*
